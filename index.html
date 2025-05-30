@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel - Customer Care Chat</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
+    .container { max-width: 900px; margin: 40px auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 12px #0001; padding: 0; display: flex; min-height: 500px; }
+    .user-list { width: 220px; border-right: 1px solid #eee; background: #f8fafd; border-radius: 10px 0 0 10px; padding: 20px 0; }
+    .user-list h3 { margin: 0 0 10px 20px; color: #0078d7; }
+    .user-item { padding: 12px 20px; cursor: pointer; border-bottom: 1px solid #eee; }
+    .user-item.active, .user-item:hover { background: #eaf3fa; }
+    .chat-area { flex: 1; padding: 30px; display: flex; flex-direction: column; }
+    h2 { color: #0078d7; margin-top: 0; }
+    #chat-messages { flex: 1; height: 350px; overflow-y: auto; background: #f8fafd; padding: 10px; border-radius: 8px; margin-bottom: 16px; }
+    .chat-message { margin-bottom: 12px; }
+    .chat-user { text-align: right; }
+    .chat-admin { text-align: left; }
+    .chat-bubble-user {
+      background: #0078d7; color: #fff; display: inline-block; padding: 8px 14px; border-radius: 16px 16px 2px 16px;
+    }
+    .chat-bubble-admin {
+      background: #eaf3fa; color: #222; display: inline-block; padding: 8px 14px; border-radius: 16px 16px 16px 2px;
+    }
+    #chat-input { width: 80%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
+    #chat-send-btn { padding: 8px 16px; border-radius: 6px; border: none; background: #0078d7; color: #fff; cursor: pointer; }
+    .no-user { color: #888; text-align: center; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="user-list">
+      <h3>Users</h3>
+      <div id="user-list"></div>
+    </div>
+    <div class="chat-area">
+      <h2 id="chat-title">Select a user</h2>
+      <div id="chat-messages"></div>
+      <div id="chat-input-area" style="display:none;">
+        <input id="chat-input" type="text" placeholder="Type your reply..." />
+        <button id="chat-send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // --- BACKEND URL (auto switch for localhost or hosting) ---
+    const BACKEND_URL =
+      window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : "https://your-domain.com"; // <-- Replace with your hosting URL
+
+    const SEND_CHAT_URL = "http://localhost:3000/admin-reply";
+    const RECEIVE_CHAT_URL = "http://localhost:3000/receive-messages";
+
+    let allMessages = [];
+    let selectedUser = null;
+
+    function loadChatMessages() {
+      fetch(RECEIVE_CHAT_URL)
+        .then(res => res.json())
+        .then(data => {
+          allMessages = Array.isArray(data) ? data : [];
+          renderUserList();
+          renderChat();
+        });
+    }
+
+    function renderUserList() {
+      // Get unique users from messages
+      const users = [...new Set(allMessages.filter(m => !m.isAdmin).map(m => m.name || "Guest"))];
+      const userListDiv = document.getElementById('user-list');
+      if (!users.length) {
+        userListDiv.innerHTML = '<div class="no-user">No users yet.</div>';
+        return;
+      }
+      userListDiv.innerHTML = users.map(user =>
+        `<div class="user-item${user === selectedUser ? ' active' : ''}" onclick="selectUser('${user.replace(/'/g, "\\'")}')">${user}</div>`
+      ).join('');
+    }
+
+    // Expose for onclick
+    window.selectUser = function(user) {
+      selectedUser = user;
+      document.getElementById('chat-title').textContent = `Chat with ${user}`;
+      document.getElementById('chat-input-area').style.display = '';
+      renderUserList();
+      renderChat();
+    };
+
+    function renderChat() {
+      const chat = document.getElementById('chat-messages');
+      if (!selectedUser) {
+        chat.innerHTML = '<div class="no-user">Select a user to view messages.</div>';
+        document.getElementById('chat-input-area').style.display = 'none';
+        document.getElementById('chat-title').textContent = 'Select a user';
+        return;
+      }
+      // Show only messages for selected user
+      const msgs = allMessages.filter(m => (m.name === selectedUser && !m.isAdmin) || (m.isAdmin && m.replyTo === selectedUser));
+      chat.innerHTML = '';
+      if (msgs.length) {
+        msgs.forEach(msg => {
+          if (msg.isAdmin) {
+            chat.innerHTML += `<div class="chat-message chat-admin"><span class="chat-bubble-admin"><strong>Admin:</strong> ${msg.reply || msg.message || ""}</span></div>`;
+          } else {
+            chat.innerHTML += `<div class="chat-message chat-user"><span class="chat-bubble-user">${msg.message || ""}</span></div>`;
+          }
+        });
+      } else {
+        chat.innerHTML = `<div style="color:#888;text-align:center;">No messages yet.</div>`;
+      }
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function sendChatMessage() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg || !selectedUser) return;
+      fetch(SEND_CHAT_URL, {
+        method: "POST",
+        body: JSON.stringify({ reply: msg, replyTo: selectedUser }),
+        headers: { "Content-Type": "application/json" }
+      })
+      .then(res => res.json())
+      .then(() => {
+        input.value = '';
+        loadChatMessages();
+      })
+      .catch(() => {
+        alert('Failed to send message.');
+      });
+    }
+
+    document.getElementById('chat-send-btn').onclick = sendChatMessage;
+    document.getElementById('chat-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') sendChatMessage();
+    });
+
+    loadChatMessages();
+    setInterval(loadChatMessages, 3000); // Auto-refresh every 3 seconds
+  </script>
+</body>
+</html>
